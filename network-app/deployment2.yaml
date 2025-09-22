@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chart2-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chart2
+  template:
+    metadata:
+      labels:
+        app: chart2
+    spec:
+      hostNetwork: true
+      containers:
+      - name: chart2
+        image: "localhost:5000/chart2:1.0"
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: STREAM_URL
+          value: "rtsp://10.16.9.3:554/stream1"
+        - name: NETWORK_APP_URL
+          value: "http://localhost:8000"
+        resources:
+          limits:
+            nvidia.com/gpu: 1        
