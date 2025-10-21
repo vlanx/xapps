@@ -1,0 +1,3 @@
+# GUI build (HighGUI available) for local/macOS or Linux with display
+ultralytics>=8.3.0
+opencv-python>=4.12.0.88

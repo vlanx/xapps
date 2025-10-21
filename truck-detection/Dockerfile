@@ -1,15 +1,23 @@
-FROM amd64/python:3.9-slim-buster
+FROM python:3.11-slim-bookworm
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \ 
+    QT_QPA_PLATFORM=offscreen
+
 WORKDIR /app
 
-COPY . /app
+COPY requirements.txt .
+RUN python -m pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-ENV STREAM_URL=rtsp://192.168.94.142:554/stream2
-ENV NETWORK_APP_URL=localhost:3000
+RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0
 
+# Copy the rest of the directory. Dockerignore makes it so that no junk is passed.
+COPY truck-detection.py yolo11m.pt .
 
-RUN apt update && apt install ffmpeg libsm6 libxext6  -y
-RUN apt install net-tools
+# run as non-root
+RUN useradd -m appuser && chown -R appuser:appuser /app
+USER appuser
 
-RUN pip3 install --no-cache-dir -r requirements.txt
-
-CMD ["python3", "video.py"]
+ENTRYPOINT ["python3", "truck-detection.py"]
