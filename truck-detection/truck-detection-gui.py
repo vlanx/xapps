@@ -18,6 +18,7 @@
 import time
 import argparse
 import cv2
+from pathlib import Path
 from datetime import datetime
 from ultralytics import YOLO
 import logging
@@ -29,18 +30,14 @@ TRUCK_WND = "Truck detected"
 # Truck index in the COCO dataset
 TRUCKS = 7
 
+# Static image serving
+OUT = Path("srv/frames")
+OUT.mkdir(parents=True, exist_ok=True)
+
 # Logs
 logging.basicConfig(level=logging.INFO)
 logging.setLoggerClass(logging.Logger)
 logger = logging.getLogger()
-
-
-def can_show_windows() -> bool:
-    # If HighGUI isn't compiled (headless wheels), imshow won't exist.
-    if not hasattr(cv2, "imshow"):
-        return False
-
-    return True  # macOS/Windows
 
 
 def timestamp() -> str:
@@ -64,6 +61,11 @@ def has_truck(result) -> bool:
 def annotate_image(result):
     """Return an image with boxes/labels drawn (BGR for OpenCV)."""
     return result.plot()
+
+
+def save_image(image):
+    tmp = OUT / ".latest.jpg"
+    cv2.imwrite(str(tmp), image, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
 
 
 def main():
@@ -107,20 +109,18 @@ def main():
     # Stream source
     source = args.source
 
-    # Decide whether we can show windows
-    show_windows = can_show_windows()
-
     # Load model
     model = YOLO(args.model)
 
     paused = False
+    saved_image = False
     last_truck_img = None
 
-    if show_windows:
-        cv2.namedWindow(MAIN_WND, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(MAIN_WND, 1280, 720)
-        cv2.namedWindow(TRUCK_WND, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(TRUCK_WND, 640, 360)
+    # Create the detection windows
+    cv2.namedWindow(MAIN_WND, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(MAIN_WND, 1280, 720)
+    cv2.namedWindow(TRUCK_WND, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(TRUCK_WND, 640, 360)
 
     # Continuous loop with reconnect on error/end
     while True:
@@ -136,12 +136,11 @@ def main():
 
             for result in gen:
                 if paused:
-                    if show_windows:
-                        key = cv2.waitKey(30) & 0xFF
-                        if key == ord("p"):
-                            paused = False
-                        elif key == ord("q"):
-                            raise KeyboardInterrupt
+                    key = cv2.waitKey(30) & 0xFF
+                    if key == ord("p"):
+                        paused = False
+                    elif key == ord("q"):
+                        raise KeyboardInterrupt
                     continue
 
                 # Annotate & display
@@ -150,21 +149,21 @@ def main():
                 # Truck logic
                 if has_truck(result):
                     last_truck_img = img_annot.copy()
-                    if show_windows:
-                        cv2.imshow(TRUCK_WND, last_truck_img)
+                    cv2.imshow(TRUCK_WND, last_truck_img)
                     logger.info("sending network command")
+                    if not saved_image:
+                        save_image(last_truck_img)
+                        saved_image = True
+                else:
+                    saved_image = False
 
                 # Show main live view (if GUI available)
-                if show_windows:
-                    cv2.imshow(MAIN_WND, img_annot)
-                    key = cv2.waitKey(1) & 0xFF
-                    if key == ord("q"):
-                        raise KeyboardInterrupt
-                    elif key == ord("p"):
-                        paused = True
-                else:
-                    # Headless mode heartbeat (quiet by default)
-                    pass
+                cv2.imshow(MAIN_WND, img_annot)
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord("q"):
+                    raise KeyboardInterrupt
+                elif key == ord("p"):
+                    paused = True
 
             # If generator finishes (file ends or stream breaks), reconnect.
             logger.warning("[stream] ended or interrupted; attempting reconnect...")
@@ -178,8 +177,8 @@ def main():
             time.sleep(args.reconnect_wait)
             logger.error("[retry] attempting to reconnect...")
 
-    if show_windows:
-        cv2.destroyAllWindows()
+    # In the end, destroy cv2
+    cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
