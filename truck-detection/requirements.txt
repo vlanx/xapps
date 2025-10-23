@@ -7,3 +7,5 @@ torch==2.4.1+cpu
 # Other dependencies
 ultralytics==8.3.0
 opencv-python-headless==4.10.0.84
+aiohttp==3.13.1
+dotenv==0.9.9

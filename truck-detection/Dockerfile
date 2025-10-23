@@ -14,7 +14,7 @@ RUN python -m pip install --upgrade pip && \
 RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0
 
 # Copy the rest of the directory. Dockerignore makes it so that no junk is passed.
-COPY truck-detection.py yolo11m.pt .
+COPY truck-detection.py yolo11n.pt .
 
 # run as non-root
 RUN useradd -m appuser && chown -R appuser:appuser /app

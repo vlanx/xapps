@@ -14,25 +14,52 @@
 
 import time
 import argparse
-from datetime import datetime
 from ultralytics import YOLO
-import logging
-
-# Window names
-MAIN_WND = "YOLO view"
-TRUCK_WND = "Truck detected"
+import logging, sys, os
+import cv2
+import aiohttp, asyncio, threading
+from dotenv import load_dotenv
 
 # Truck index in the COCO dataset
 TRUCKS = 7
 
 # Logs
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(threadName)s] %(name)s %(levelname)s: %(message)s",
+    stream=sys.stdout,
+    force=True,
+)
 logging.setLoggerClass(logging.Logger)
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
+logger.propagate = True
 
 
-def timestamp() -> str:
-    return datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+# Create one shared session for network commands
+async def _make_session():
+    return aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
+
+
+def fire_network_comm(coroutine, label):
+    fut = asyncio.run_coroutine_threadsafe(coroutine, loop)
+    fut.add_done_callback(
+        lambda f: f.exception()
+        and logger.warning("%s failed: %r", label, f.exception())
+    )
+    return fut
+
+
+# API Client session to send requests
+loop = asyncio.new_event_loop()
+threading.Thread(target=loop.run_forever, daemon=True).start()
+
+# Create session
+session = asyncio.run_coroutine_threadsafe(_make_session(), loop).result()
+
+# Load credentials.
+load_dotenv()
+USERNAME = os.getenv("USERNAME")
+PASS = os.getenv("PASS")
 
 
 def has_truck(result) -> bool:
@@ -43,7 +70,6 @@ def has_truck(result) -> bool:
     # If there's a Truck (7th index of class names)
     detected_classes = result.boxes.cls.tolist()
     if TRUCKS in detected_classes:
-        logger.info("Truck Detected")
         return True
 
     return False
@@ -54,9 +80,67 @@ def annotate_image(result):
     return result.plot()
 
 
+def save_image(image):
+    tmp = "/frames/latest.jpg"
+    cv2.imwrite(str(tmp), image, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+    logger.info(f"Saved image to {str(tmp)}")
+
+
+async def activate_antennas(session):
+    # Activate Antenna 352. It's already at max TX/RX power.
+    async with session.post(
+        url="http://10.16.10.74:8000/antena/253",
+        json={"antenasIDs": [352]},
+        auth=aiohttp.BasicAuth(login=str(USERNAME), password=str(PASS)),
+    ) as response:
+        r = await response.json()
+        logger.info("Enabled Antenna Cell 352 status(%s)", r["description"])
+
+
+async def bump_power(session):
+    # Bump Antenna 351 to max TX/RX power.
+    async with session.patch(
+        url="http://10.16.10.74:8000/antena/253/control",
+        json={"antenasIDs": [351], "Power": 242, "SU - MIMO": True},
+        auth=aiohttp.BasicAuth(login=str(USERNAME), password=str(PASS)),
+    ) as response:
+        r = await response.json()
+        logger.info(
+            "Bumped Antenna Cell 351 to max power (status %s)", r["description"]
+        )
+
+
+async def deactivate_antennas(session):
+    # Deactivate Antenna 352.
+    async with session.delete(
+        url="http://10.16.10.74:8000/antena/253",
+        json={"antenasIDs": [352]},
+        auth=aiohttp.BasicAuth(login=str(USERNAME), password=str(PASS)),
+    ) as response:
+        if response.status == 204:
+            logger.info("Disabled Antenna Cell 352 (204 No Content)")
+        else:
+            # Drain whatever came back (empty) and ignore it
+            await response.read()
+            logger.info("Disabled Antenna Cell 352 (status %s)", response.status)
+
+
+async def downgrade_power(session):
+    # Downgrade Antenna 351 to minimum TX/RX power.
+    async with session.patch(
+        url="http://10.16.10.74:8000/antena/253/control",
+        json={"antenasIDs": [351], "Power": 70, "SU - MIMO": False},
+        auth=aiohttp.BasicAuth(login=str(USERNAME), password=str(PASS)),
+    ) as response:
+        r = await response.json()
+        logger.info(
+            "Downgraded Atenna Cell 351 to minimum power (status %s)", r["description"]
+        )
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="RTSP truck detector (Ultralytics YOLO + OpenCV)."
+        description="RTSP truck detector (Ultralytics YOLO)."
     )
     parser.add_argument(
         "--source",
@@ -98,6 +182,14 @@ def main():
     # Load model
     model = YOLO(args.model)
 
+    # This is to help debounce the truck detection algorithm.
+    # When we detect a truck a send a network command, we enable the `detected` flag and do not send
+    # the command again while we see the same truck. What happens is sometimes, even when detecting the same truck,
+    # not all frames are detected as containing a truck, hence the debounce limit.
+    detected = False
+    misses = 0
+    max_misses = 25
+
     # Continuous loop with reconnect on error/end
     while True:
         try:
@@ -113,7 +205,35 @@ def main():
             for result in gen:
                 # Truck logic
                 if has_truck(result):
-                    logger.info("sending network command")
+                    # Annotate & save
+                    if not detected:
+                        logger.info("Truck Detected")
+                        logger.info("Sending network command")
+                        img_annot = annotate_image(result)
+                        save_image(img_annot)
+                        fire_network_comm(activate_antennas(session), "activate")
+                        # Can't do this now, Slice manager cannot handle multiple requests
+                        # fire_network_comm(bump_power(session), "bump")
+                        detected = True
+                    else:
+                        logger.info("Same truck still in frame")
+                    misses = 0
+                else:
+                    misses += 1
+                    if misses >= max_misses:
+                        logger.info(
+                            f"No truck in the last {misses} frames. Assuming no truck in sight."
+                        )
+                        # If we have previously detected a truck, now it is gone. we can deactivate the antennas.
+                        # This blocks sending the deactivation command every time there isn't a truck in sight.
+                        if detected:
+                            fire_network_comm(
+                                deactivate_antennas(session), "deactivate"
+                            )
+                            # Can't do this now, Slice manager cannot handle multiple requests
+                            # fire_network_comm(downgrade_power(session), "downgrade")
+                        # Reset the detected flag
+                        detected = False
 
             # If generator finishes (file ends or stream breaks), reconnect.
             logger.warning("[stream] ended or interrupted; attempting reconnect...")
@@ -130,3 +250,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+    asyncio.run_coroutine_threadsafe(session.close(), loop).result()
+    loop.call_soon_threadsafe(loop.stop)
+    logger.info("[exit] Closed asyncio and threads")
