@@ -60,6 +60,7 @@ session = asyncio.run_coroutine_threadsafe(_make_session(), loop).result()
 load_dotenv()
 USERNAME = os.getenv("USERNAME")
 PASS = os.getenv("PASS")
+ENDPOINT = os.getenv("ENDPOINT")
 
 
 def has_truck(result) -> bool:
@@ -89,7 +90,7 @@ def save_image(image):
 async def activate_antennas(session):
     # Activate Antenna 352. It's already at max TX/RX power.
     async with session.post(
-        url="http://10.16.10.74:8000/antena/253",
+        url=f"http://{ENDPOINT}/antena/253",
         json={"antenasIDs": [352]},
         auth=aiohttp.BasicAuth(login=str(USERNAME), password=str(PASS)),
     ) as response:
@@ -100,7 +101,7 @@ async def activate_antennas(session):
 async def bump_power(session):
     # Bump Antenna 351 to max TX/RX power.
     async with session.patch(
-        url="http://10.16.10.74:8000/antena/253/control",
+        url=f"http://{ENDPOINT}/antena/253/control",
         json={"antenasIDs": [351], "Power": 242, "SU - MIMO": True},
         auth=aiohttp.BasicAuth(login=str(USERNAME), password=str(PASS)),
     ) as response:
@@ -113,7 +114,7 @@ async def bump_power(session):
 async def deactivate_antennas(session):
     # Deactivate Antenna 352.
     async with session.delete(
-        url="http://10.16.10.74:8000/antena/253",
+        url=f"http://{ENDPOINT}/antena/253",
         json={"antenasIDs": [352]},
         auth=aiohttp.BasicAuth(login=str(USERNAME), password=str(PASS)),
     ) as response:
@@ -128,7 +129,7 @@ async def deactivate_antennas(session):
 async def downgrade_power(session):
     # Downgrade Antenna 351 to minimum TX/RX power.
     async with session.patch(
-        url="http://10.16.10.74:8000/antena/253/control",
+        url=f"http://{ENDPOINT}/antena/253/control",
         json={"antenasIDs": [351], "Power": 70, "SU - MIMO": False},
         auth=aiohttp.BasicAuth(login=str(USERNAME), password=str(PASS)),
     ) as response:
@@ -213,7 +214,7 @@ def main():
                         save_image(img_annot)
                         fire_network_comm(activate_antennas(session), "activate")
                         # Can't do this now, Slice manager cannot handle multiple requests
-                        # fire_network_comm(bump_power(session), "bump")
+                        fire_network_comm(bump_power(session), "bump")
                         detected = True
                     else:
                         logger.info("Same truck still in frame")
@@ -231,7 +232,7 @@ def main():
                                 deactivate_antennas(session), "deactivate"
                             )
                             # Can't do this now, Slice manager cannot handle multiple requests
-                            # fire_network_comm(downgrade_power(session), "downgrade")
+                            fire_network_comm(downgrade_power(session), "downgrade")
                         # Reset the detected flag
                         detected = False
 
