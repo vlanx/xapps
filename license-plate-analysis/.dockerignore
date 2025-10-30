@@ -1,0 +1,12 @@
+.git
+__pycache__/
+*.py[cod]
+*.ipynb_checkpoints/
+.DS_Store
+venv/ 
+env/ 
+env/
+dist/ 
+build/
+requirements_gui.txt
+other-models/
