@@ -111,34 +111,6 @@ async def bump_power(session):
         )
 
 
-async def deactivate_antennas(session):
-    # Deactivate Antenna 352.
-    async with session.delete(
-        url=f"http://{ENDPOINT}/antena/253",
-        json={"antenasIDs": [352]},
-        auth=aiohttp.BasicAuth(login=str(USERNAME), password=str(PASS)),
-    ) as response:
-        if response.status == 204:
-            logger.info("Disabled Antenna Cell 352 (204 No Content)")
-        else:
-            # Drain whatever came back (empty) and ignore it
-            await response.read()
-            logger.info("Disabled Antenna Cell 352 (status %s)", response.status)
-
-
-async def downgrade_power(session):
-    # Downgrade Antenna 351 to minimum TX/RX power.
-    async with session.patch(
-        url=f"http://{ENDPOINT}/antena/253/control",
-        json={"antenasIDs": [351], "Power": 70, "SU - MIMO": False},
-        auth=aiohttp.BasicAuth(login=str(USERNAME), password=str(PASS)),
-    ) as response:
-        r = await response.json()
-        logger.info(
-            "Downgraded Atenna Cell 351 to minimum power (status %s)", r["description"]
-        )
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="RTSP truck detector (Ultralytics YOLO)."
@@ -156,6 +128,12 @@ def main():
         help="Ultralytics model to use (e.g. yolo11n.pt, yolo11s.pt, custom.pt).",
     )
     parser.add_argument("--conf", type=float, default=0.5, help="Confidence threshold.")
+    parser.add_argument(
+        "--antenna",
+        type=bool,
+        default=False,
+        help="Whether to manage and activate the antennas",
+    )
     parser.add_argument(
         "--reconnect-wait",
         type=float,
@@ -191,6 +169,9 @@ def main():
     misses = 0
     max_misses = 25
 
+    # Antenna flag. When disabled, the program will not make requests to alter the antenna state.
+    antenna = args.antenna
+
     # Continuous loop with reconnect on error/end
     while True:
         try:
@@ -212,9 +193,9 @@ def main():
                         logger.info("Sending network command")
                         img_annot = annotate_image(result)
                         save_image(img_annot)
-                        fire_network_comm(activate_antennas(session), "activate")
-                        # Can't do this now, Slice manager cannot handle multiple requests
-                        fire_network_comm(bump_power(session), "bump")
+                        if antenna:
+                            fire_network_comm(activate_antennas(session), "activate")
+                            fire_network_comm(bump_power(session), "bump")
                         detected = True
                     else:
                         logger.info("Same truck still in frame")
@@ -226,14 +207,6 @@ def main():
                             logger.info(
                                 f"No truck in the last {misses} frames. Assuming no truck in sight."
                             )
-                            # If we have previously detected a truck, now it is gone. we can deactivate the antennas.
-                            # This blocks sending the deactivation command every time there isn't a truck in sight.
-                        if detected:
-                            fire_network_comm(
-                                deactivate_antennas(session), "deactivate"
-                            )
-                            # Can't do this now, Slice manager cannot handle multiple requests
-                            fire_network_comm(downgrade_power(session), "downgrade")
                         # Reset the detected flag
                         detected = False
 

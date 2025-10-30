@@ -75,7 +75,7 @@ spec:
     spec:
       containers:
       - name: detector
-        image: your-registry/truck-detection:cpu
+        image: ghcr.io/vlanx/truck-detection:lateset
         # image ENTRYPOINT runs truck-detection.py
         args:
           - "--source=rtsp://10.255.35.86/stream2"
