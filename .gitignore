@@ -209,5 +209,8 @@ __marimo__/
 #MacOS
 .DS_Store
 
-# Yolo
+# Yolo models
 *.pt
+
+# EasyOCR models
+*.pth
