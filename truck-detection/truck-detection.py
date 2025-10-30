@@ -222,11 +222,12 @@ def main():
                 else:
                     misses += 1
                     if misses >= max_misses:
-                        logger.info(
-                            f"No truck in the last {misses} frames. Assuming no truck in sight."
-                        )
-                        # If we have previously detected a truck, now it is gone. we can deactivate the antennas.
-                        # This blocks sending the deactivation command every time there isn't a truck in sight.
+                        if misses % 50 == 0:
+                            logger.info(
+                                f"No truck in the last {misses} frames. Assuming no truck in sight."
+                            )
+                            # If we have previously detected a truck, now it is gone. we can deactivate the antennas.
+                            # This blocks sending the deactivation command every time there isn't a truck in sight.
                         if detected:
                             fire_network_comm(
                                 deactivate_antennas(session), "deactivate"

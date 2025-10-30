@@ -8,4 +8,4 @@ env/
 env/
 dist/ 
 build/
-requirements_macos.txt
+requirements_gui.txt
