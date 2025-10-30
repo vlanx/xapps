@@ -24,6 +24,60 @@ import cv2
 import aiohttp, asyncio, threading
 import easyocr
 
+# ---- OTel setup (code-only) -------------------------------------------------
+from opentelemetry.sdk.resources import Resource
+
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry._logs import set_logger_provider
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+
+
+# Load credentials.
+load_dotenv()
+USERNAME = os.getenv("USERNAME")
+PASS = os.getenv("PASS")
+ENDPOINT = os.getenv("ENDPOINT")
+LOKI = os.getenv("LOKI")
+
+
+def setup_otel_log():
+    # Machine logger (OTLP -> Loki)
+    resource = Resource.create(
+        {
+            "service.name": "license-plate-analysis",
+            "service.namespace": "nexus",
+            "deployment.environment": "dev",
+        }
+    )
+    provider = LoggerProvider(resource=resource)
+    set_logger_provider(provider)
+
+    exporter = OTLPLogExporter(  # HTTP exporter
+        endpoint=f"http://{LOKI}/otlp/v1/logs",
+        headers={"X-Scope-OrgID": "IT"},  # harmless in single-tenant
+        timeout=10_000,
+    )
+    provider.add_log_record_processor(
+        BatchLogRecordProcessor(
+            exporter,
+            max_queue_size=4096,
+            max_export_batch_size=512,
+            schedule_delay_millis=5000,
+            export_timeout_millis=10_000,
+        )
+    )
+
+    otlp_handler = LoggingHandler(level=logging.INFO, logger_provider=provider)
+
+    telemetry = logging.getLogger("telemetry")
+    telemetry.setLevel(logging.INFO)
+    telemetry.propagate = False
+    telemetry.handlers[:] = [otlp_handler]
+
+    return telemetry
+
+
 # Logs
 logging.basicConfig(
     level=logging.INFO,
@@ -34,6 +88,8 @@ logging.basicConfig(
 logging.setLoggerClass(logging.Logger)
 logger = logging.getLogger(__name__)
 logger.propagate = True
+
+otel_logs = setup_otel_log()
 
 # Easy OCR config
 reader = easyocr.Reader(
@@ -69,12 +125,6 @@ threading.Thread(target=loop.run_forever, daemon=True).start()
 
 # Create session
 session = asyncio.run_coroutine_threadsafe(_make_session(), loop).result()
-
-# Load credentials.
-load_dotenv()
-USERNAME = os.getenv("USERNAME")
-PASS = os.getenv("PASS")
-ENDPOINT = os.getenv("ENDPOINT")
 
 # License plate class index:
 LIC_PLATE = 0
@@ -173,6 +223,7 @@ async def deactivate_antennas(session):
             # Drain whatever came back (empty) and ignore it
             await response.read()
             logger.info("Disabled Antenna Cell 352 (status %s)", response.status)
+            otel_logs.info("Disabled Antenna Cell 352 (status %s)", response.status)
 
 
 async def downgrade_power(session):
@@ -184,6 +235,9 @@ async def downgrade_power(session):
     ) as response:
         r = await response.json()
         logger.info(
+            "Downgraded Atenna Cell 351 to minimum power (status %s)", r["description"]
+        )
+        otel_logs.info(
             "Downgraded Atenna Cell 351 to minimum power (status %s)", r["description"]
         )
 
@@ -209,6 +263,7 @@ def main():
         "--antenna",
         type=bool,
         default=False,
+        action=argparse.BooleanOptionalAction,
         help="Whether to manage and activate the antennas",
     )
     parser.add_argument(
@@ -227,6 +282,7 @@ def main():
         "--verbose",
         type=bool,
         default=False,
+        action=argparse.BooleanOptionalAction,
         help="Whether to output the verbose log of the prediction method",
     )
 
@@ -245,6 +301,10 @@ def main():
 
     # Antenna flag. When disabled, the program will not make requests to alter the antenna state.
     antenna = args.antenna
+    logger.info(
+        f"[bold magenta]Antenna management: {antenna}[/]",
+        extra={"markup": True},
+    )
 
     # Continuous loop with reconnect on error/end
     while True:
@@ -273,6 +333,7 @@ def main():
                                 f"[bold blue]--Locked License plate: {locked}--[/]",
                                 extra={"markup": True},
                             )
+                            otel_logs.info(f"License plate: {locked}")
                             plate_hits.clear()  # simple reset for the next vehicle
                             processing_done = True
 
@@ -289,6 +350,9 @@ def main():
                             fire_network_comm(downgrade_power(session), "downgrade")
                         if misses % 50 == 0:
                             logger.info(
+                                f"No license plate in the last {misses} frames. Assuming no truck in sight."
+                            )
+                            otel_logs.info(
                                 f"No license plate in the last {misses} frames. Assuming no truck in sight."
                             )
                         # Assume we're on to the next truck. Clear the dictionary of license plates
