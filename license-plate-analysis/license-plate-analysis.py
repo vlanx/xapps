@@ -14,21 +14,22 @@
 #   python license-plate-analysis-gui.py --source sample.mp4 --conf 0.8
 
 from collections import defaultdict
+from dotenv import load_dotenv
+from ultralytics import YOLO
+from rich.logging import RichHandler
 import time
 import argparse
-from ultralytics import YOLO
-import logging, sys, os
+import logging, os
 import cv2
 import aiohttp, asyncio, threading
-from dotenv import load_dotenv
 import easyocr
 
 # Logs
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(threadName)s] %(name)s %(levelname)s: %(message)s",
-    stream=sys.stdout,
+    format="%(asctime)s %(levelname)s: %(message)s",
     force=True,
+    handlers=[RichHandler(show_time=False, rich_tracebacks=True)],
 )
 logging.setLoggerClass(logging.Logger)
 logger = logging.getLogger(__name__)
@@ -205,6 +206,12 @@ def main():
     )
     parser.add_argument("--conf", type=float, default=0.5, help="Confidence threshold.")
     parser.add_argument(
+        "--antenna",
+        type=bool,
+        default=False,
+        help="Whether to manage and activate the antennas",
+    )
+    parser.add_argument(
         "--reconnect-wait",
         type=float,
         default=2.0,
@@ -234,7 +241,10 @@ def main():
     # Number of missing frames to discard this detection phase.
     misses = 0
     max_misses = 50
-    already_read = False
+    processing_done = False
+
+    # Antenna flag. When disabled, the program will not make requests to alter the antenna state.
+    antenna = args.antenna
 
     # Continuous loop with reconnect on error/end
     while True:
@@ -251,7 +261,7 @@ def main():
             for result in gen:
                 # Detect license plate
                 if has_license_plate(result):
-                    if not already_read:
+                    if not processing_done:
                         # Retrieves the license plate crop
                         bb = get_bounding_box(result)
                         plate = get_text_from_lp(bb)
@@ -259,22 +269,31 @@ def main():
                         save_image(bb)
 
                         if locked:
-                            logger.info("Locked License plate: (%s)", locked)
+                            logger.info(
+                                f"[bold blue]--Locked License plate: {locked}--[/]",
+                                extra={"markup": True},
+                            )
                             plate_hits.clear()  # simple reset for the next vehicle
-                            already_read = True
+                            processing_done = True
 
                         # Reset the misses counter
                         misses = 0
                 else:
                     misses += 1
                     if misses >= max_misses:
+                        # Processing is done. We can disable the antennas.
+                        if antenna and processing_done:
+                            fire_network_comm(
+                                deactivate_antennas(session), "deactivate"
+                            )
+                            fire_network_comm(downgrade_power(session), "downgrade")
                         if misses % 50 == 0:
                             logger.info(
                                 f"No license plate in the last {misses} frames. Assuming no truck in sight."
                             )
                         # Assume we're on to the next truck. Clear the dictionary of license plates
                         plate_hits.clear()  # simple reset for the next vehicle
-                        already_read = False
+                        processing_done = False
 
             # If generator finishes (file ends or stream breaks), reconnect.
             time.sleep(args.reconnect_wait)
@@ -284,9 +303,9 @@ def main():
             logger.info("[exit] interrupted by user")
             break
         except Exception as ex:
-            logger.error(f"[warn] exception: {ex}")
+            logger.warning(f"[warn] exception: {ex}")
             time.sleep(args.reconnect_wait)
-            logger.error("[retry] attempting to reconnect...")
+            logger.warning("[retry] attempting to reconnect...")
 
 
 if __name__ == "__main__":
