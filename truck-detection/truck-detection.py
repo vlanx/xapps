@@ -132,6 +132,7 @@ def main():
         "--antenna",
         type=bool,
         default=False,
+        action=argparse.BooleanOptionalAction,
         help="Whether to manage and activate the antennas",
     )
     parser.add_argument(
@@ -150,6 +151,7 @@ def main():
         "--verbose",
         type=bool,
         default=False,
+        action=argparse.BooleanOptionalAction,
         help="Whether to output the verbose log of the prediction method",
     )
 
@@ -190,10 +192,10 @@ def main():
                     # Annotate & save
                     if not detected:
                         logger.info("Truck Detected")
-                        logger.info("Sending network command")
                         img_annot = annotate_image(result)
                         save_image(img_annot)
                         if antenna:
+                            logger.info("Sending network command")
                             fire_network_comm(activate_antennas(session), "activate")
                             fire_network_comm(bump_power(session), "bump")
                         detected = True

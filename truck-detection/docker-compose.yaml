@@ -19,8 +19,6 @@ services:
       - "rtsp://10.255.35.86/stream2"
       - "--model"
       - "yolo11n.pt"
-      - "--antenna"
-      - "false"
     env_file: .env
     volumes:
       - frames:/frames
