@@ -35,6 +35,10 @@ logger = logging.getLogger(__name__)
 logger.propagate = True
 
 # Easy OCR config
+reader = easyocr.Reader(
+    ["en"], gpu=False, download_enabled=False, model_storage_directory="easy-ocr-models"
+)
+
 reader = easyocr.Reader(["en"], gpu=False)
 ALLOW = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789- "  # Only possible characters
 
