@@ -1,7 +1,7 @@
 # For now, READMEs inside each dir.
 
 ##### Grafana visualization
-[Grafana](grafana.png)
+![Grafana](grafana.png)
 
 This is made possible because I load an HTML script inside a `Text` Panel which loads these images.
 
