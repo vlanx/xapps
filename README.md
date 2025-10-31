@@ -46,7 +46,7 @@ This is made possible because I load an HTML script inside a `Text` Panel which 
 ##### HTTP server
 I run a small `HTTP` web server container alongside the detection/analysis containers which serves the frames that those containers save in `/frames/latest.png`.
 
-Small HTTP web server: [darkhttpd](!https://github.com/emikulic/darkhttpd)
+Small HTTP web server: [darkhttpd](https://github.com/emikulic/darkhttpd)
 
 This is the snippet on my `docker-compose.yaml` 
 ```
@@ -72,7 +72,7 @@ You have to allow unsafe HTML scripting for the panels to work. This should not 
 disable_sanitize_html = true
 ```
 
-You also need to force Grafana to serve HTTP instead of HTTPS, else the scrip above won't load.
+You also need to force Grafana to serve HTTP instead of HTTPS, else the script above won't load.
 ```
 [server]
 # Protocol (http, https, h2, socket)
