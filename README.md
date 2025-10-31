@@ -1,4 +1,4 @@
-# For now, READMEs inside each dir.
+# Truck Detection and License Plate Analysis Apps
 
 ##### Grafana visualization
 ![Grafana](grafana.png)
